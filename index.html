@@ -98,6 +98,10 @@
           </select>
         </div>
 
+        <button onclick="openCsvImportModal()" class="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs transition flex items-center gap-1.5 shadow-sm">
+          <span>⬆</span> Import CSV
+        </button>
+
         <button onclick="switchTab('recurring')" class="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs transition flex items-center gap-1.5 shadow-sm">
           <span>⚡</span> Populate Monthly Bills
         </button>
@@ -107,7 +111,7 @@
         </button>
 
         <label class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition cursor-pointer">
-          ⬆ Restore
+          ⬆ Restore JSON
           <input type="file" accept=".json" class="hidden" onchange="importBackupJSON(event)" />
         </label>
 
@@ -146,6 +150,151 @@
   <div id="toastBanner" class="hidden fixed bottom-5 right-5 z-50 max-w-md bg-slate-900 border border-amber-500/60 text-slate-100 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3">
     <span id="toastIcon" class="text-lg">✅</span>
     <span id="toastText" class="text-xs sm:text-sm font-medium"></span>
+  </div>
+
+  <!-- CSV Import & Mapping Modal -->
+  <div id="csvImportModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div class="bg-slate900 border border-slate-700 rounded-2xl max-w-5xl w-full p-5 sm:p-6 shadow-2xl space-y-5 my-auto max-h-[92vh] flex flex-col">
+      <!-- Modal Header -->
+      <div class="flex items-start justify-between gap-4 border-b border-slate-800 pb-4 shrink-0">
+        <div>
+          <h3 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+            <span class="text-sky-400">⬆</span> Smart CSV Statement & Ledger Importer
+          </h3>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Supports AarMax8 exported CSVs, SoFi Checking statements, U.S. Bank / Harley-Davidson Visa CSVs, Apple Card CSVs, or any custom spreadsheet CSV.
+          </p>
+        </div>
+        <button onclick="closeCsvImportModal()" class="text-slate-400 hover:text-white px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold">✕ Close</button>
+      </div>
+
+      <!-- Step 1: Target Account, Import Mode & File Dropzone -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
+        <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
+          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400">1. Target Account Register</label>
+          <select id="csvTargetAccount" onchange="onCsvConfigChange()" class="w-full bg-slate900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold text-amber-400 focus:outline-none focus:border-amber-500">
+            <option value="sofi">🏦 SoFi Checking Ledger</option>
+            <option value="hd">🏍️ Harley-Davidson Visa Register</option>
+            <option value="apple">🍎 Apple Card Register</option>
+          </select>
+          <p class="text-[11px] text-slate-500">Auto-detects account when uploading an AarMax8 or bank CSV.</p>
+        </div>
+
+        <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
+          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400">2. Import Mode & Duplicates</label>
+          <select id="csvImportMode" onchange="onCsvConfigChange()" class="w-full bg-slate900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-amber-500">
+            <option value="merge" selected>Merge & Skip Duplicates (Recommended)</option>
+            <option value="append">Append All Rows (Allow Duplicates)</option>
+            <option value="replace">Replace Entire Account Register</option>
+          </select>
+          <div class="flex items-center gap-2 pt-0.5">
+            <input type="checkbox" id="csvAutoCategorize" checked onchange="onCsvConfigChange()" class="rounded accent-amber-500 cursor-pointer" />
+            <label for="csvAutoCategorize" class="text-[11px] text-slate-300 cursor-pointer">Auto-categorize known merchants if blank</label>
+          </div>
+        </div>
+
+        <div class="bg-slate-950/80 border border-dashed border-sky-500/50 hover:border-sky-400 rounded-xl p-3.5 flex flex-col justify-center items-center text-center transition cursor-pointer relative"
+             ondragover="event.preventDefault(); this.classList.add('bg-sky-500/10');"
+             ondragleave="this.classList.remove('bg-sky-500/10');"
+             ondrop="handleCsvDrop(event)">
+          <input type="file" id="csvFileInput" accept=".csv,text/csv" onchange="handleCsvFileSelect(event)" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
+          <div class="text-xl mb-1">📄</div>
+          <div id="csvFileNameDisplay" class="text-xs font-bold text-sky-400">Click or Drag & Drop CSV File Here</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">Supports .csv files of any column order</div>
+        </div>
+      </div>
+
+      <!-- Step 2: Dynamic Column Mapping Controls (Shown once CSV is loaded) -->
+      <div id="csvMappingSection" class="hidden bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3 shrink-0">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="text-xs font-bold text-white flex items-center gap-2">
+            <span>🧭 Column Mapping</span>
+            <span id="csvFormatBadge" class="text-[11px] font-mono-num px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Auto-Mapped</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-[11px] text-slate-400">Single-Amount Sign Rule:</label>
+            <select id="csvSignConvention" onchange="onCsvConfigChange()" class="bg-slate900 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200">
+              <option value="auto" selected>Smart Auto-Detect</option>
+              <option value="sofi_std">Checking: +Deposit / -Payment</option>
+              <option value="card_pos_charge">Card: +Charge / -Payment</option>
+              <option value="card_neg_charge">Card (U.S. Bank): -Charge / +Payment</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 text-xs">
+          <div>
+            <label class="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Date *</label>
+            <select id="mapDate" onchange="onCsvMappingChange()" class="w-full bg-slate900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"></select>
+          </div>
+          <div>
+            <label class="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Payee / Merchant *</label>
+            <select id="mapPayee" onchange="onCsvMappingChange()" class="w-full bg-slate900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"></select>
+          </div>
+          <div>
+            <label id="mapDescLabel" class="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Desc / Notes</label>
+            <select id="mapDesc" onchange="onCsvMappingChange()" class="w-full bg-slate900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"></select>
+          </div>
+          <div>
+            <label class="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Category</label>
+            <select id="mapCategory" onchange="onCsvMappingChange()" class="w-full bg-slate900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"></select>
+          </div>
+          <div>
+            <label class="block text-[10px] uppercase font-semibold text-slate-400 mb-1">Cycle</label>
+            <select id="mapCycle" onchange="onCsvMappingChange()" class="w-full bg-slate900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"></select>
+          </div>
+          <div>
+            <label id="mapPosLabel" class="block text-[10px] uppercase font-semibold text-emerald-400 mb-1">Deposit / Charge</label>
+            <select id="mapPrimaryAmt" onchange="onCsvMappingChange()" class="w-full bg-slate900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"></select>
+          </div>
+          <div>
+            <label id="mapNegLabel" class="block text-[10px] uppercase font-semibold text-rose-400 mb-1">Payment / Credit</label>
+            <select id="mapSecondaryAmt" onchange="onCsvMappingChange()" class="w-full bg-slate900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"></select>
+          </div>
+          <div>
+            <label class="block text-[10px] uppercase font-semibold text-sky-400 mb-1">Or Single Amount</label>
+            <select id="mapSingleAmt" onchange="onCsvMappingChange()" class="w-full bg-slate900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3: Live Preview Table -->
+      <div id="csvPreviewContainer" class="flex-1 min-h-[180px] overflow-y-auto bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+        <div id="csvEmptyState" class="h-44 flex flex-col items-center justify-center text-center text-slate-500 text-xs">
+          <p class="font-semibold text-slate-400 mb-1">No CSV file selected yet</p>
+          <p>Select or drop a <code class="text-sky-400">.csv</code> file above to preview parsed transactions before importing.</p>
+        </div>
+        <div id="csvPreviewTableWrap" class="hidden space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs pb-2 border-b border-slate-800">
+            <span id="csvPreviewSummary" class="font-semibold text-slate-200"></span>
+            <span class="text-[11px] text-slate-400">Showing up to first 25 parsed rows</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr id="csvPreviewHead" class="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-400 bg-slate-900/80"></tr>
+              </thead>
+              <tbody id="csvPreviewBody" class="divide-y divide-slate-800/50"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4 shrink-0">
+        <div class="text-[11px] text-slate-400">
+          💡 Tip: Exporting a CSV from any tab and re-importing it later maps 100% of fields automatically.
+        </div>
+        <div class="flex items-center gap-2.5">
+          <button onclick="closeCsvImportModal()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300">
+            Cancel
+          </button>
+          <button id="confirmCsvImportBtn" onclick="executeCsvImport()" disabled class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-bold text-xs transition shadow-md">
+            ✅ Import Transactions
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Custom Confirmation Modal (Replaces native confirm/alert) -->
@@ -268,13 +417,16 @@
             <h2 class="text-base font-bold text-white">🏦 SoFi Checking Account • Live Register & Balance Tracker</h2>
             <p class="text-xs text-slate-400">Chronological running balance auto-calculates from bottom (oldest) to top (newest)</p>
           </div>
-          <div class="flex flex-wrap items-center gap-3">
+          <div class="flex flex-wrap items-center gap-2.5">
             <div class="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5">
               <label class="text-xs text-slate-400">Pre-9/1 Starting Bal ($):</label>
               <input type="number" step="0.01" id="sofiStartBalInput" onchange="updateAccountConfig('sofiStartBalance', this.value)" class="w-24 bg-transparent text-right font-mono-num text-xs font-bold text-emerald-400 focus:outline-none" />
             </div>
             <input type="text" id="sofiSearch" placeholder="Search payee, category..." oninput="renderSofiLedger()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500" />
-            <button onclick="exportCSV('sofi')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700">
+            <button onclick="openCsvImportModal('sofi')" class="px-3 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-xs font-semibold text-sky-300 border border-sky-500/40 transition">
+              ⬆ Import CSV
+            </button>
+            <button onclick="exportCSV('sofi')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition">
               ⬇ Export CSV
             </button>
           </div>
@@ -376,13 +528,16 @@
             <h2 class="text-base font-bold text-white">🏍️ Harley-Davidson Visa • Live Card Register & Statement Tracker</h2>
             <p class="text-xs text-slate-400">All 33 September baseline transactions loaded • Running debt balance updates automatically</p>
           </div>
-          <div class="flex flex-wrap items-center gap-3">
+          <div class="flex flex-wrap items-center gap-2.5">
             <div class="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5">
               <label class="text-xs text-slate-400">Monthly Spending Cap ($):</label>
               <input type="number" step="0.01" id="hdCapInput" onchange="updateAccountConfig('hdCap', this.value)" class="w-24 bg-transparent text-right font-mono-num text-xs font-bold text-amber-400 focus:outline-none" />
             </div>
             <input type="text" id="hdSearch" placeholder="Search merchant, notes..." oninput="renderCardLedger('hd')" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500" />
-            <button onclick="exportCSV('hd')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700">
+            <button onclick="openCsvImportModal('hd')" class="px-3 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-xs font-semibold text-sky-300 border border-sky-500/40 transition">
+              ⬆ Import CSV
+            </button>
+            <button onclick="exportCSV('hd')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition">
               ⬇ Export CSV
             </button>
           </div>
@@ -468,13 +623,16 @@
             <h2 class="text-base font-bold text-white">🍎 Apple Card • Live Card Register & Statement Tracker</h2>
             <p class="text-xs text-slate-400">Tracks monthly Apple Card subscriptions, pharmacy, retail, and SoFi payoff</p>
           </div>
-          <div class="flex flex-wrap items-center gap-3">
+          <div class="flex flex-wrap items-center gap-2.5">
             <div class="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5">
               <label class="text-xs text-slate-400">Monthly Spending Cap ($):</label>
               <input type="number" step="0.01" id="appleCapInput" onchange="updateAccountConfig('appleCap', this.value)" class="w-24 bg-transparent text-right font-mono-num text-xs font-bold text-amber-400 focus:outline-none" />
             </div>
             <input type="text" id="appleSearch" placeholder="Search merchant, notes..." oninput="renderCardLedger('apple')" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500" />
-            <button onclick="exportCSV('apple')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700">
+            <button onclick="openCsvImportModal('apple')" class="px-3 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-xs font-semibold text-sky-300 border border-sky-500/40 transition">
+              ⬆ Import CSV
+            </button>
+            <button onclick="exportCSV('apple')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition">
               ⬇ Export CSV
             </button>
           </div>
@@ -717,7 +875,7 @@
         <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
         <span>Engineered for <strong>AarMax8</strong> • Pre-loaded with <code class="text-amber-400">bills 2026 09 21.xlsx</code> (54 Ledger Entries & 16 Recurring Bills)</span>
       </div>
-      <div>Auto-saves locally in your browser • Click any cell to adjust</div>
+      <div>Auto-saves locally in your browser • Supports CSV Import & Export</div>
     </div>
   </footer>
 
@@ -850,6 +1008,7 @@
     };
 
     let state = loadState();
+    let activeTab = 'dashboard';
 
     function loadState() {
       try {
@@ -875,7 +1034,7 @@
       document.getElementById('toastText').textContent = msg;
       banner.classList.remove('hidden');
       clearTimeout(window._toastTimer);
-      window._toastTimer = setTimeout(() => banner.classList.add('hidden'), 4000);
+      window._toastTimer = setTimeout(() => banner.classList.add('hidden'), 4200);
     }
 
     function fmt(n) {
@@ -884,7 +1043,38 @@
       return sign + "$" + Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
+    function formatMonthLabel(ym) {
+      if (!ym || ym === 'ALL') return 'All Dates';
+      const parts = ym.split('-');
+      if (parts.length !== 2) return ym;
+      const mNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const mIdx = parseInt(parts[1], 10) - 1;
+      if (mIdx >= 0 && mIdx < 12) {
+        return `${mNames[mIdx]} '${parts[0].slice(2)} (${ym})`;
+      }
+      return ym;
+    }
+
+    function syncPeriodSelectOptions() {
+      const select = document.getElementById('periodSelect');
+      if (!select) return;
+      const months = new Set(['2026-09', '2026-10', '2026-11', '2026-12']);
+      [...state.sofi, ...state.hd, ...state.apple].forEach(r => {
+        if (r.date && /^\d{4}-\d{2}/.test(r.date)) {
+          months.add(r.date.slice(0, 7));
+        }
+      });
+      if (state.activePeriod && state.activePeriod !== 'ALL') {
+        months.add(state.activePeriod);
+      }
+      const sorted = Array.from(months).sort();
+      select.innerHTML = sorted.map(m =>
+        `<option value="${m}" class="bg-slate-900 text-white" ${state.activePeriod === m ? 'selected' : ''}>${formatMonthLabel(m)}</option>`
+      ).join('') + `<option value="ALL" class="bg-slate-900 text-white" ${state.activePeriod === 'ALL' ? 'selected' : ''}>All Dates</option>`;
+    }
+
     function switchTab(tabId) {
+      activeTab = tabId;
       document.querySelectorAll('.tab-btn').forEach(btn => {
         const active = btn.dataset.tab === tabId;
         btn.className = active
@@ -930,7 +1120,7 @@
     }
 
     function renderAll() {
-      document.getElementById('periodSelect').value = state.activePeriod || '2026-09';
+      syncPeriodSelectOptions();
       document.getElementById('sofiStartBalInput').value = state.config.sofiStartBalance;
       document.getElementById('hdCapInput').value = state.config.hdCap;
       document.getElementById('appleCapInput').value = state.config.appleCap;
@@ -1009,7 +1199,6 @@
         </div>
       `;
 
-      // Credit Card Capacity Table
       document.getElementById('ccPeriodLabel').textContent = p;
       const hdRem = state.config.hdCap - hdSpend;
       const apRem = state.config.appleCap - appleSpend;
@@ -1062,10 +1251,10 @@
         return `
           <tr class="hover:bg-slate-800/40">
             <td class="py-2 px-2">
-              <input type="text" value="${v.name}" onchange="updateVault(${idx}, 'name', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-2 py-1 text-xs font-medium text-white focus:outline-none" />
+              <input type="text" value="${escapeAttr(v.name)}" onchange="updateVault(${idx}, 'name', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-2 py-1 text-xs font-medium text-white focus:outline-none" />
             </td>
             <td class="py-2 px-2">
-              <input type="text" value="${v.category}" onchange="updateVault(${idx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-2 py-1 text-xs text-slate-300 focus:outline-none" />
+              <input type="text" value="${escapeAttr(v.category)}" onchange="updateVault(${idx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-2 py-1 text-xs text-slate-300 focus:outline-none" />
             </td>
             <td class="py-2 px-2 text-right">
               <input type="number" step="0.01" value="${v.target}" onchange="updateVault(${idx}, 'target', this.value)" class="w-24 bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-2 py-1 text-right font-mono-num text-xs text-slate-200 focus:outline-none" />
@@ -1140,6 +1329,10 @@
       `;
     }
 
+    function escapeAttr(str) {
+      return String(str ?? '').replace(/"/g, '&quot;');
+    }
+
     function renderSofiLedger() {
       const p = state.activePeriod;
       const q = (document.getElementById('sofiSearch')?.value || '').toLowerCase();
@@ -1187,9 +1380,9 @@
         return `
           <tr class="hover:bg-slate-800/40">
             <td class="py-2 px-2"><input type="date" value="${r.date}" onchange="editSofi(${origIdx}, 'date', this.value)" class="bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-200" /></td>
-            <td class="py-2 px-2"><input type="text" value="${r.payee}" onchange="editSofi(${origIdx}, 'payee', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs font-medium text-white" /></td>
-            <td class="py-2 px-2"><input type="text" value="${r.description}" onchange="editSofi(${origIdx}, 'description', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-400" /></td>
-            <td class="py-2 px-2"><input type="text" value="${r.category}" list="sofiCatList" onchange="editSofi(${origIdx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-300" /></td>
+            <td class="py-2 px-2"><input type="text" value="${escapeAttr(r.payee)}" onchange="editSofi(${origIdx}, 'payee', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs font-medium text-white" /></td>
+            <td class="py-2 px-2"><input type="text" value="${escapeAttr(r.description)}" onchange="editSofi(${origIdx}, 'description', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-400" /></td>
+            <td class="py-2 px-2"><input type="text" value="${escapeAttr(r.category)}" list="sofiCatList" onchange="editSofi(${origIdx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-300" /></td>
             <td class="py-2 px-2">
               <select onchange="editSofi(${origIdx}, 'cycle', this.value)" class="bg-transparent hover:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-300">
                 <option value="1st Cycle" class="bg-slate-900" ${r.cycle === '1st Cycle' ? 'selected' : ''}>1st Cycle</option>
@@ -1256,13 +1449,13 @@
         return `
           <tr class="hover:bg-slate-800/40">
             <td class="py-2 px-2"><input type="date" value="${r.date}" onchange="editCard('${cardKey}', ${origIdx}, 'date', this.value)" class="bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-200" /></td>
-            <td class="py-2 px-2"><input type="text" value="${r.payee}" onchange="editCard('${cardKey}', ${origIdx}, 'payee', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs font-medium text-white" /></td>
-            <td class="py-2 px-2"><input type="text" value="${r.category}" list="${cardKey}CatList" onchange="editCard('${cardKey}', ${origIdx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-300" /></td>
-            <td class="py-2 px-2"><input type="text" value="${r.cycle}" onchange="editCard('${cardKey}', ${origIdx}, 'cycle', this.value)" class="w-20 bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-400" /></td>
+            <td class="py-2 px-2"><input type="text" value="${escapeAttr(r.payee)}" onchange="editCard('${cardKey}', ${origIdx}, 'payee', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs font-medium text-white" /></td>
+            <td class="py-2 px-2"><input type="text" value="${escapeAttr(r.category)}" list="${cardKey}CatList" onchange="editCard('${cardKey}', ${origIdx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-300" /></td>
+            <td class="py-2 px-2"><input type="text" value="${escapeAttr(r.cycle)}" onchange="editCard('${cardKey}', ${origIdx}, 'cycle', this.value)" class="w-20 bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-400" /></td>
             <td class="py-2 px-2 text-right"><input type="number" step="0.01" value="${r.charge}" onchange="editCard('${cardKey}', ${origIdx}, 'charge', this.value)" class="w-24 bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-right font-mono-num text-xs text-rose-400" /></td>
             <td class="py-2 px-2 text-right"><input type="number" step="0.01" value="${r.payment}" onchange="editCard('${cardKey}', ${origIdx}, 'payment', this.value)" class="w-24 bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-right font-mono-num text-xs text-emerald-400" /></td>
             <td class="py-2 px-2.5 text-right font-mono-num font-bold text-white">${fmt(r.runningBalance)}</td>
-            <td class="py-2 px-2"><input type="text" value="${r.notes || ''}" onchange="editCard('${cardKey}', ${origIdx}, 'notes', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-400" /></td>
+            <td class="py-2 px-2"><input type="text" value="${escapeAttr(r.notes || '')}" onchange="editCard('${cardKey}', ${origIdx}, 'notes', this.value)" class="w-full bg-transparent hover:bg-slate-950 focus:bg-slate-950 border border-transparent focus:border-amber-500 rounded px-1.5 py-1 text-xs text-slate-400" /></td>
             <td class="py-2 px-2 text-right"><button onclick="deleteCardTx('${cardKey}', ${origIdx})" class="text-slate-500 hover:text-rose-400 px-1.5 py-1 text-xs">✕</button></td>
           </tr>
         `;
@@ -1308,7 +1501,7 @@
                 <option value="15th Cycle" class="bg-slate-900" ${item.cycle === '15th Cycle' ? 'selected' : ''}>15th Cycle</option>
               </select>
             </td>
-            <td class="py-2 px-2"><input type="text" value="${item.name}" onchange="editBudgetFixed(${idx}, 'name', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs font-medium text-white" /></td>
+            <td class="py-2 px-2"><input type="text" value="${escapeAttr(item.name)}" onchange="editBudgetFixed(${idx}, 'name', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs font-medium text-white" /></td>
             <td class="py-2 px-2">
               <select onchange="editBudgetFixed(${idx}, 'type', this.value)" class="bg-transparent text-xs ${item.type === 'income' ? 'text-emerald-400' : 'text-slate-300'}">
                 <option value="income" class="bg-slate-900" ${item.type === 'income' ? 'selected' : ''}>Income (+)</option>
@@ -1351,7 +1544,7 @@
                 <option value="apple" class="bg-slate-900" ${bc.card === 'apple' ? 'selected' : ''}>Apple Card</option>
               </select>
             </td>
-            <td class="py-2 px-2.5"><input type="text" value="${bc.category}" onchange="editCardBudget(${idx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs font-medium text-white" /></td>
+            <td class="py-2 px-2.5"><input type="text" value="${escapeAttr(bc.category)}" onchange="editCardBudget(${idx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs font-medium text-white" /></td>
             <td class="py-2 px-2.5 text-right"><input type="number" step="0.01" value="${bVal}" onchange="editCardBudget(${idx}, 'budget', this.value)" class="w-24 bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-right font-mono-num text-xs text-slate-200" /></td>
             <td class="py-2 px-2.5 text-right font-mono-num text-xs text-slate-300">${fmt(actual)}</td>
             <td class="py-2 px-2.5 text-right font-mono-num text-xs font-bold ${rem < 0 ? 'text-rose-400' : 'text-emerald-400'}">${fmt(rem)}</td>
@@ -1403,11 +1596,11 @@
           <td class="py-2 px-3">
             <input type="checkbox" ${r.checked ? 'checked' : ''} onchange="editRecurring(${idx}, 'checked', this.checked)" class="rounded accent-amber-500 cursor-pointer" />
           </td>
-          <td class="py-2 px-2.5"><input type="text" value="${r.name}" onchange="editRecurring(${idx}, 'name', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs font-semibold text-white" /></td>
-          <td class="py-2 px-2.5"><input type="text" value="${r.payee}" onchange="editRecurring(${idx}, 'payee', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs text-slate-300" /></td>
-          <td class="py-2 px-2.5"><input type="text" value="${r.dueDay}" onchange="editRecurring(${idx}, 'dueDay', this.value)" class="w-16 bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs font-mono-num text-amber-400" /></td>
+          <td class="py-2 px-2.5"><input type="text" value="${escapeAttr(r.name)}" onchange="editRecurring(${idx}, 'name', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs font-semibold text-white" /></td>
+          <td class="py-2 px-2.5"><input type="text" value="${escapeAttr(r.payee)}" onchange="editRecurring(${idx}, 'payee', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs text-slate-300" /></td>
+          <td class="py-2 px-2.5"><input type="text" value="${escapeAttr(r.dueDay)}" onchange="editRecurring(${idx}, 'dueDay', this.value)" class="w-16 bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs font-mono-num text-amber-400" /></td>
           <td class="py-2 px-2.5 text-right"><input type="number" step="0.01" value="${r.amount}" onchange="editRecurring(${idx}, 'amount', this.value)" class="w-24 bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-right font-mono-num text-xs font-bold text-white" /></td>
-          <td class="py-2 px-2.5"><input type="text" value="${r.category}" onchange="editRecurring(${idx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs text-slate-300" /></td>
+          <td class="py-2 px-2.5"><input type="text" value="${escapeAttr(r.category)}" onchange="editRecurring(${idx}, 'category', this.value)" class="w-full bg-transparent hover:bg-slate-950 rounded px-1.5 py-1 text-xs text-slate-300" /></td>
           <td class="py-2 px-2.5">
             <select onchange="editRecurring(${idx}, 'cycle', this.value)" class="bg-transparent text-xs text-slate-300">
               <option value="1st Cycle" class="bg-slate-900" ${r.cycle === '1st Cycle' ? 'selected' : ''}>1st Cycle</option>
@@ -1656,6 +1849,563 @@
       renderAll();
 
       showToast(`Populated ${added} recurring bills into ${ym} (${skipped} duplicates skipped)`);
+    }
+
+    // =========================================================================
+    // SMART CSV IMPORT ENGINE (Supports App CSV, SoFi, HD Visa/US Bank, Apple Card & Custom CSVs)
+    // =========================================================================
+    let csvWizardState = {
+      rawHeaders: [],
+      rawRows: [],
+      parsedTransactions: [],
+      duplicateCount: 0,
+      fileName: ''
+    };
+
+    function parseRFC4180CSV(text) {
+      // Remove BOM if present
+      const clean = text.replace(/^\uFEFF/, '').trim();
+      if (!clean) return { headers: [], rows: [] };
+
+      const rows = [];
+      let curRow = [];
+      let curVal = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < clean.length; i++) {
+        const ch = clean[i];
+        const next = clean[i + 1];
+
+        if (inQuotes) {
+          if (ch === '"' && next === '"') {
+            curVal += '"';
+            i++;
+          } else if (ch === '"') {
+            inQuotes = false;
+          } else {
+            curVal += ch;
+          }
+        } else {
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ',') {
+            curRow.push(curVal.trim());
+            curVal = '';
+          } else if (ch === '\r' && next === '\n') {
+            curRow.push(curVal.trim());
+            if (curRow.some(cell => cell !== '')) rows.push(curRow);
+            curRow = [];
+            curVal = '';
+            i++;
+          } else if (ch === '\n' || ch === '\r') {
+            curRow.push(curVal.trim());
+            if (curRow.some(cell => cell !== '')) rows.push(curRow);
+            curRow = [];
+            curVal = '';
+          } else {
+            curVal += ch;
+          }
+        }
+      }
+      curRow.push(curVal.trim());
+      if (curRow.some(cell => cell !== '')) rows.push(curRow);
+
+      if (!rows.length) return { headers: [], rows: [] };
+      const headers = rows[0].map((h, i) => h || `Column ${i + 1}`);
+      const dataRows = rows.slice(1);
+      return { headers, rows: dataRows };
+    }
+
+    function normalizeDateString(rawDate) {
+      if (!rawDate) return '2026-09-29';
+      const s = String(rawDate).trim();
+      // Already YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // YYYY/MM/DD
+      let m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+      if (m) {
+        return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+      }
+      // MM/DD/YYYY or MM-DD-YYYY or MM/DD/YY
+      m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+      if (m) {
+        let yr = m[3];
+        if (yr.length === 2) yr = (parseInt(yr, 10) > 50 ? '19' : '20') + yr;
+        return `${yr}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+      }
+      // Fallback Date parse
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      }
+      return '2026-09-29';
+    }
+
+    function parseCurrencyNumber(val) {
+      if (val === undefined || val === null || val === '') return 0;
+      let s = String(val).trim();
+      if (!s) return 0;
+      // Handle accounting parentheses e.g. ($45.20) -> -45.20
+      let isNeg = false;
+      if (/^\(.*\)$/.test(s)) {
+        isNeg = true;
+        s = s.slice(1, -1);
+      }
+      if (s.startsWith('-')) {
+        isNeg = !isNeg;
+        s = s.slice(1);
+      }
+      s = s.replace(/[^0-9.]/g, '');
+      const num = parseFloat(s);
+      if (isNaN(num)) return 0;
+      return isNeg ? -num : num;
+    }
+
+    function inferCategory(account, payee, desc, existingCat) {
+      const cleanCat = String(existingCat || '').trim();
+      const autoCat = document.getElementById('csvAutoCategorize')?.checked !== false;
+      if (cleanCat && cleanCat.toLowerCase() !== 'uncategorized' && cleanCat.toLowerCase() !== 'other') {
+        return cleanCat;
+      }
+      if (!autoCat) {
+        return cleanCat || (account === 'sofi' ? 'Uncategorized' : 'Other / Not Budgeted');
+      }
+      const text = `${payee} ${desc}`.toLowerCase();
+
+      if (account === 'sofi') {
+        if (text.includes('federal express') || text.includes('paycheck') || text.includes('payroll') || text.includes('direct deposit')) return 'Income Deposit';
+        if (text.includes('joint')) return 'Housing / Joint';
+        if (text.includes('harleydavidson') || text.includes('hdfs') || text.includes('ford')) return 'Auto Loan';
+        if (text.includes('u.s. bank') || text.includes('hd card') || text.includes('apple card') || text.includes('credit card')) return 'Credit Card Payment';
+        if (text.includes('pnc')) return 'Debt Repayment';
+        if (text.includes('vault') || text.includes('tire fund') || text.includes('musa')) return 'Vault Savings';
+        if (text.includes('liberty')) return 'Medication';
+        if (text.includes('verizon') || text.includes('gemini')) return 'Utilities';
+        if (text.includes('roth') || text.includes('ira')) return 'Investments';
+        if (text.includes('fee')) return 'Banking Fees';
+        return cleanCat || 'Uncategorized';
+      }
+
+      if (account === 'hd') {
+        if (text.includes('payment thank you') || text.includes('internet payment') || text.includes('autopay')) return 'Card Payment';
+        if (text.includes('sunoco') || text.includes('sheetz') || text.includes('bp ') || text.includes('shell') || text.includes('exxon') || text.includes('wawa') || text.includes('fuel') || text.includes('gas')) return 'Gas / Fuel';
+        if (text.includes('wm supercenter') || text.includes('walmart') || text.includes('wine and spirits') || text.includes('walgreens') || text.includes('cane') || text.includes('breakfast') || text.includes('butcher') || text.includes('restaurant') || text.includes('grocery') || text.includes('giant eagle')) return 'Food & Dining';
+        if (text.includes('stitch fix') || text.includes('uniqlo') || text.includes('custom.c') || text.includes('apparel')) return 'Clothing & Apparel';
+        if (text.includes('nutrabio') || text.includes('supplement') || text.includes('gnc')) return 'Nutrabio / Supplements';
+        if (text.includes('google') || text.includes('netflix') || text.includes('hulu') || text.includes('stream')) return 'Streaming Services';
+        if (text.includes('st. jude') || text.includes('st jude')) return 'St. Jude Donation';
+        if (text.includes('amazon') || text.includes('conwell') || text.includes('septa')) return 'Shayla';
+        return cleanCat || 'Other / Not Budgeted';
+      }
+
+      if (account === 'apple') {
+        if (text.includes('payment') || text.includes('sofi')) return 'Card Payment';
+        if (text.includes('spotify')) return 'Spotify';
+        if (text.includes('cvs') || text.includes('pharmacy') || text.includes('walgreens')) return 'CVS / Pharmacy';
+        if (text.includes('uber') || text.includes('lyft')) return 'Uber / Rideshare';
+        return cleanCat || 'Other Retail';
+      }
+
+      return cleanCat || 'Uncategorized';
+    }
+
+    function deriveCycleFromDate(dateStr, account) {
+      if (account === 'sofi') {
+        const day = parseInt(dateStr.slice(8, 10), 10) || 1;
+        return day <= 10 ? '1st Cycle' : '15th Cycle';
+      } else {
+        const mNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const [yr, mo] = dateStr.split('-');
+        const mIdx = (parseInt(mo, 10) || 9) - 1;
+        return `${mNames[mIdx]} '${String(yr || '2026').slice(2)}`;
+      }
+    }
+
+    function openCsvImportModal(defaultAcct) {
+      if (defaultAcct) {
+        document.getElementById('csvTargetAccount').value = defaultAcct;
+      } else if (activeTab === 'sofi' || activeTab === 'hd' || activeTab === 'apple') {
+        document.getElementById('csvTargetAccount').value = activeTab;
+      }
+      updateCsvModalFieldLabels();
+      document.getElementById('csvImportModal').classList.remove('hidden');
+    }
+
+    function closeCsvImportModal() {
+      document.getElementById('csvImportModal').classList.add('hidden');
+    }
+
+    function handleCsvDrop(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('bg-sky-500/10');
+      const file = e.dataTransfer?.files?.[0];
+      if (file) processUploadedCsvFile(file);
+    }
+
+    function handleCsvFileSelect(e) {
+      const file = e.target.files?.[0];
+      if (file) processUploadedCsvFile(file);
+    }
+
+    function processUploadedCsvFile(file) {
+      csvWizardState.fileName = file.name;
+      document.getElementById('csvFileNameDisplay').textContent = `Loaded: ${file.name}`;
+
+      // Auto-detect target account from filename if obvious
+      const lowerName = file.name.toLowerCase();
+      if (lowerName.includes('sofi') || lowerName.includes('checking')) {
+        document.getElementById('csvTargetAccount').value = 'sofi';
+      } else if (lowerName.includes('hd') || lowerName.includes('harley') || lowerName.includes('visa') || lowerName.includes('usbank')) {
+        document.getElementById('csvTargetAccount').value = 'hd';
+      } else if (lowerName.includes('apple')) {
+        document.getElementById('csvTargetAccount').value = 'apple';
+      }
+
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const text = String(ev.target.result || '');
+        const parsed = parseRFC4180CSV(text);
+        if (!parsed.headers.length || !parsed.rows.length) {
+          showToast('CSV file appears to be empty or invalid', '⚠️');
+          return;
+        }
+        csvWizardState.rawHeaders = parsed.headers;
+        csvWizardState.rawRows = parsed.rows;
+        autoDetectAccountAndColumns();
+        buildPreviewAndValidate();
+      };
+      reader.readAsText(file);
+    }
+
+    function findHeaderIndex(headers, patterns) {
+      const lower = headers.map(h => h.toLowerCase().trim());
+      for (const pat of patterns) {
+        const exactIdx = lower.findIndex(h => h === pat);
+        if (exactIdx !== -1) return exactIdx;
+      }
+      for (const pat of patterns) {
+        const partIdx = lower.findIndex(h => h.includes(pat));
+        if (partIdx !== -1) return partIdx;
+      }
+      return -1;
+    }
+
+    function updateCsvModalFieldLabels() {
+      const acct = document.getElementById('csvTargetAccount').value;
+      document.getElementById('mapDescLabel').textContent = acct === 'sofi' ? 'Statement Desc' : 'Notes / Memo';
+      document.getElementById('mapPosLabel').textContent = acct === 'sofi' ? 'Deposit (+)' : 'Charge (+)';
+      document.getElementById('mapNegLabel').textContent = acct === 'sofi' ? 'Payment (-)' : 'Payment / Credit (-)';
+    }
+
+    function autoDetectAccountAndColumns() {
+      const h = csvWizardState.rawHeaders;
+      const lowerH = h.map(x => x.toLowerCase().trim());
+
+      // Check if headers uniquely identify an AarMax8 or Apple/SoFi/HD export
+      if (lowerH.includes('deposit') && lowerH.includes('status')) {
+        document.getElementById('csvTargetAccount').value = 'sofi';
+        document.getElementById('csvFormatBadge').textContent = 'AarMax8 SoFi CSV Detected';
+      } else if (lowerH.includes('charge') && lowerH.includes('notes')) {
+        document.getElementById('csvFormatBadge').textContent = 'AarMax8 Card CSV Detected';
+      } else if (lowerH.includes('clearing date') || lowerH.includes('amount (usd)')) {
+        document.getElementById('csvTargetAccount').value = 'apple';
+        document.getElementById('csvFormatBadge').textContent = 'Apple Card Statement CSV';
+      } else if (lowerH.includes('current balance') && lowerH.includes('status')) {
+        document.getElementById('csvTargetAccount').value = 'sofi';
+        document.getElementById('csvFormatBadge').textContent = 'SoFi Bank Statement CSV';
+      } else if (lowerH.includes('memo') && lowerH.includes('transaction')) {
+        document.getElementById('csvTargetAccount').value = 'hd';
+        document.getElementById('csvFormatBadge').textContent = 'U.S. Bank / HD Visa CSV';
+      } else {
+        document.getElementById('csvFormatBadge').textContent = 'Custom CSV Mapped';
+      }
+
+      updateCsvModalFieldLabels();
+
+      // Populate all mapping dropdowns
+      const mapIds = ['mapDate', 'mapPayee', 'mapDesc', 'mapCategory', 'mapCycle', 'mapPrimaryAmt', 'mapSecondaryAmt', 'mapSingleAmt'];
+      const optionsHtml = `<option value="-1">-- None / Auto --</option>` +
+        h.map((colName, idx) => `<option value="${idx}">${escapeAttr(colName)}</option>`).join('');
+      mapIds.forEach(id => {
+        document.getElementById(id).innerHTML = optionsHtml;
+      });
+
+      const acct = document.getElementById('csvTargetAccount').value;
+
+      // Auto-select best columns
+      const dateIdx = findHeaderIndex(h, ['transaction date', 'date', 'post date', 'posted date']);
+      const payeeIdx = findHeaderIndex(h, ['payee', 'merchant', 'name', 'vendor', 'description']);
+      let descIdx = findHeaderIndex(h, ['description', 'notes', 'memo', 'statement description']);
+      if (descIdx === payeeIdx) {
+        descIdx = findHeaderIndex(h, ['memo', 'notes', 'type']);
+      }
+      const catIdx = findHeaderIndex(h, ['category', 'type']);
+      const cycleIdx = findHeaderIndex(h, ['cycle', 'pay cycle', 'period']);
+
+      const primaryIdx = acct === 'sofi'
+        ? findHeaderIndex(h, ['deposit', 'credit', 'inflow', 'deposits'])
+        : findHeaderIndex(h, ['charge', 'debit', 'purchase', 'charges']);
+
+      const secondaryIdx = acct === 'sofi'
+        ? findHeaderIndex(h, ['payment', 'withdrawal', 'debit', 'outflow', 'payments'])
+        : findHeaderIndex(h, ['payment', 'credit', 'payments', 'refund']);
+
+      const singleAmtIdx = findHeaderIndex(h, ['amount (usd)', 'amount', 'total', 'value']);
+
+      document.getElementById('mapDate').value = String(dateIdx !== -1 ? dateIdx : 0);
+      document.getElementById('mapPayee').value = String(payeeIdx !== -1 ? payeeIdx : (h.length > 1 ? 1 : 0));
+      document.getElementById('mapDesc').value = String(descIdx);
+      document.getElementById('mapCategory').value = String(catIdx);
+      document.getElementById('mapCycle').value = String(cycleIdx);
+      document.getElementById('mapPrimaryAmt').value = String(primaryIdx);
+      document.getElementById('mapSecondaryAmt').value = String(secondaryIdx);
+      document.getElementById('mapSingleAmt').value = String((primaryIdx === -1 && secondaryIdx === -1) ? singleAmtIdx : -1);
+
+      document.getElementById('csvMappingSection').classList.remove('hidden');
+    }
+
+    function onCsvConfigChange() {
+      updateCsvModalFieldLabels();
+      if (csvWizardState.rawHeaders.length) {
+        buildPreviewAndValidate();
+      }
+    }
+
+    function onCsvMappingChange() {
+      if (csvWizardState.rawHeaders.length) {
+        buildPreviewAndValidate();
+      }
+    }
+
+    function buildPreviewAndValidate() {
+      const acct = document.getElementById('csvTargetAccount').value;
+      const mode = document.getElementById('csvImportMode').value;
+      const signRule = document.getElementById('csvSignConvention').value;
+
+      const dateCol = parseInt(document.getElementById('mapDate').value, 10);
+      const payeeCol = parseInt(document.getElementById('mapPayee').value, 10);
+      const descCol = parseInt(document.getElementById('mapDesc').value, 10);
+      const catCol = parseInt(document.getElementById('mapCategory').value, 10);
+      const cycleCol = parseInt(document.getElementById('mapCycle').value, 10);
+      const priCol = parseInt(document.getElementById('mapPrimaryAmt').value, 10);
+      const secCol = parseInt(document.getElementById('mapSecondaryAmt').value, 10);
+      const singleCol = parseInt(document.getElementById('mapSingleAmt').value, 10);
+
+      const statusCol = findHeaderIndex(csvWizardState.rawHeaders, ['status']);
+      const typeCol = findHeaderIndex(csvWizardState.rawHeaders, ['type', 'transaction']);
+
+      const parsedList = [];
+      let dupCount = 0;
+
+      csvWizardState.rawRows.forEach((row, idx) => {
+        const rawDate = dateCol >= 0 ? row[dateCol] : '';
+        const rawPayee = payeeCol >= 0 ? row[payeeCol] : '';
+        if (!rawDate && !rawPayee) return;
+
+        const date = normalizeDateString(rawDate);
+        const payee = (rawPayee || 'Imported Entry').trim();
+        const descOrNotes = descCol >= 0 ? (row[descCol] || '').trim() : '';
+        const rawCat = catCol >= 0 ? (row[catCol] || '').trim() : '';
+        const rawCycle = cycleCol >= 0 ? (row[cycleCol] || '').trim() : '';
+        const rawType = typeCol >= 0 ? (row[typeCol] || '').toLowerCase().trim() : '';
+
+        let posVal = 0; // deposit for sofi, charge for card
+        let negVal = 0; // payment for sofi, payment/credit for card
+
+        if (priCol >= 0 || secCol >= 0) {
+          posVal = priCol >= 0 ? Math.abs(parseCurrencyNumber(row[priCol])) : 0;
+          negVal = secCol >= 0 ? Math.abs(parseCurrencyNumber(row[secCol])) : 0;
+        } else if (singleCol >= 0) {
+          const signed = parseCurrencyNumber(row[singleCol]);
+          if (acct === 'sofi') {
+            if (signed >= 0) posVal = signed;
+            else negVal = Math.abs(signed);
+          } else {
+            // Card single-amount sign handling
+            if (signRule === 'card_pos_charge') {
+              if (signed >= 0) posVal = signed;
+              else negVal = Math.abs(signed);
+            } else if (signRule === 'card_neg_charge') {
+              if (signed < 0) posVal = Math.abs(signed);
+              else negVal = signed;
+            } else {
+              // Smart Auto-Detect for cards (checks Type column or Payee keywords like "Payment")
+              const isPaymentRow = rawType.includes('payment') || rawType.includes('credit') || payee.toLowerCase().includes('payment thank you') || payee.toLowerCase().includes('payment from');
+              if (isPaymentRow) {
+                negVal = Math.abs(signed);
+              } else if (signed < 0 && !csvWizardState.rawHeaders.some(h => h.toLowerCase().includes('usd'))) {
+                // U.S. Bank exports charges as negative numbers (-33.72) and payments as positive
+                posVal = Math.abs(signed);
+              } else {
+                posVal = Math.abs(signed);
+              }
+            }
+          }
+        }
+
+        const category = inferCategory(acct, payee, descOrNotes, rawCat);
+        const cycle = rawCycle || deriveCycleFromDate(date, acct);
+
+        if (acct === 'sofi') {
+          const rawStatus = statusCol >= 0 ? (row[statusCol] || '').trim() : 'Cleared';
+          const status = rawStatus.toLowerCase() === 'pending' ? 'Pending' : 'Cleared';
+          const isDup = mode === 'merge' && state.sofi.some(existing =>
+            existing.date === date &&
+            existing.payee.toLowerCase() === payee.toLowerCase() &&
+            Math.abs((Number(existing.deposit) || 0) - posVal) < 0.005 &&
+            Math.abs((Number(existing.payment) || 0) - negVal) < 0.005
+          );
+          if (isDup) dupCount++;
+          parsedList.push({
+            isDup,
+            tx: {
+              id: 'sofi-csv-' + Date.now() + '-' + idx,
+              date,
+              payee,
+              description: descOrNotes,
+              category,
+              cycle: (cycle === '1st Cycle' || cycle === '15th Cycle') ? cycle : deriveCycleFromDate(date, 'sofi'),
+              deposit: Math.round(posVal * 100) / 100,
+              payment: Math.round(negVal * 100) / 100,
+              status
+            }
+          });
+        } else {
+          const isDup = mode === 'merge' && state[acct].some(existing =>
+            existing.date === date &&
+            existing.payee.toLowerCase() === payee.toLowerCase() &&
+            Math.abs((Number(existing.charge) || 0) - posVal) < 0.005 &&
+            Math.abs((Number(existing.payment) || 0) - negVal) < 0.005
+          );
+          if (isDup) dupCount++;
+          parsedList.push({
+            isDup,
+            tx: {
+              id: acct + '-csv-' + Date.now() + '-' + idx,
+              date,
+              payee,
+              category,
+              cycle,
+              charge: Math.round(posVal * 100) / 100,
+              payment: Math.round(negVal * 100) / 100,
+              notes: descOrNotes
+            }
+          });
+        }
+      });
+
+      csvWizardState.parsedTransactions = parsedList;
+      csvWizardState.duplicateCount = dupCount;
+      renderCsvPreviewTable(acct);
+    }
+
+    function renderCsvPreviewTable(acct) {
+      const emptyEl = document.getElementById('csvEmptyState');
+      const wrapEl = document.getElementById('csvPreviewTableWrap');
+      const headEl = document.getElementById('csvPreviewHead');
+      const bodyEl = document.getElementById('csvPreviewBody');
+      const summaryEl = document.getElementById('csvPreviewSummary');
+      const confirmBtn = document.getElementById('confirmCsvImportBtn');
+
+      const list = csvWizardState.parsedTransactions;
+      if (!list.length) {
+        emptyEl.classList.remove('hidden');
+        wrapEl.classList.add('hidden');
+        confirmBtn.disabled = true;
+        return;
+      }
+
+      emptyEl.classList.add('hidden');
+      wrapEl.classList.remove('hidden');
+
+      const importableCount = list.filter(x => !x.isDup).length;
+      const acctLabel = acct === 'sofi' ? 'SoFi Checking' : (acct === 'hd' ? 'Harley-Davidson Visa' : 'Apple Card');
+
+      summaryEl.innerHTML = `Parsed <span class="text-amber-400 font-mono-num">${list.length}</span> rows for <span class="text-sky-400">${acctLabel}</span> • <span class="text-emerald-400 font-mono-num">${importableCount}</span> ready to import (${csvWizardState.duplicateCount} duplicates skipped)`;
+
+      confirmBtn.disabled = importableCount === 0;
+      confirmBtn.textContent = importableCount > 0
+        ? `✅ Import ${importableCount} Transaction${importableCount === 1 ? '' : 's'} into ${acctLabel}`
+        : `No New Transactions to Import`;
+
+      if (acct === 'sofi') {
+        headEl.innerHTML = `
+          <th class="py-2 px-2">State</th>
+          <th class="py-2 px-2">Date</th>
+          <th class="py-2 px-2">Payee</th>
+          <th class="py-2 px-2">Description</th>
+          <th class="py-2 px-2">Category</th>
+          <th class="py-2 px-2">Cycle</th>
+          <th class="py-2 px-2 text-right">Deposit (+)</th>
+          <th class="py-2 px-2 text-right">Payment (-)</th>
+        `;
+        bodyEl.innerHTML = list.slice(0, 25).map(({ isDup, tx }) => `
+          <tr class="${isDup ? 'opacity-40 line-through' : 'hover:bg-slate-900/50'}">
+            <td class="py-1.5 px-2 font-mono-num text-[10px]">${isDup ? '<span class="text-amber-400">DUP</span>' : '<span class="text-emerald-400">NEW</span>'}</td>
+            <td class="py-1.5 px-2 font-mono-num text-slate-300">${tx.date}</td>
+            <td class="py-1.5 px-2 font-medium text-white">${escapeAttr(tx.payee)}</td>
+            <td class="py-1.5 px-2 text-slate-400">${escapeAttr(tx.description)}</td>
+            <td class="py-1.5 px-2 text-slate-300">${escapeAttr(tx.category)}</td>
+            <td class="py-1.5 px-2 text-slate-400">${tx.cycle}</td>
+            <td class="py-1.5 px-2 text-right font-mono-num text-emerald-400">${tx.deposit ? fmt(tx.deposit) : '-'}</td>
+            <td class="py-1.5 px-2 text-right font-mono-num text-rose-400">${tx.payment ? fmt(tx.payment) : '-'}</td>
+          </tr>
+        `).join('');
+      } else {
+        headEl.innerHTML = `
+          <th class="py-2 px-2">State</th>
+          <th class="py-2 px-2">Date</th>
+          <th class="py-2 px-2">Payee / Merchant</th>
+          <th class="py-2 px-2">Category</th>
+          <th class="py-2 px-2">Cycle</th>
+          <th class="py-2 px-2 text-right">Charge (+)</th>
+          <th class="py-2 px-2 text-right">Payment (-)</th>
+          <th class="py-2 px-2">Notes</th>
+        `;
+        bodyEl.innerHTML = list.slice(0, 25).map(({ isDup, tx }) => `
+          <tr class="${isDup ? 'opacity-40 line-through' : 'hover:bg-slate-900/50'}">
+            <td class="py-1.5 px-2 font-mono-num text-[10px]">${isDup ? '<span class="text-amber-400">DUP</span>' : '<span class="text-emerald-400">NEW</span>'}</td>
+            <td class="py-1.5 px-2 font-mono-num text-slate-300">${tx.date}</td>
+            <td class="py-1.5 px-2 font-medium text-white">${escapeAttr(tx.payee)}</td>
+            <td class="py-1.5 px-2 text-slate-300">${escapeAttr(tx.category)}</td>
+            <td class="py-1.5 px-2 text-slate-400">${tx.cycle}</td>
+            <td class="py-1.5 px-2 text-right font-mono-num text-rose-400">${tx.charge ? fmt(tx.charge) : '-'}</td>
+            <td class="py-1.5 px-2 text-right font-mono-num text-emerald-400">${tx.payment ? fmt(tx.payment) : '-'}</td>
+            <td class="py-1.5 px-2 text-slate-400">${escapeAttr(tx.notes)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    function executeCsvImport() {
+      const acct = document.getElementById('csvTargetAccount').value;
+      const mode = document.getElementById('csvImportMode').value;
+      const toImport = csvWizardState.parsedTransactions.filter(x => !x.isDup).map(x => x.tx);
+
+      if (!toImport.length) return;
+
+      if (mode === 'replace') {
+        state[acct] = [...toImport];
+      } else {
+        state[acct] = [...toImport, ...state[acct]];
+      }
+
+      // Sort chronologically descending (newest at top, oldest at bottom)
+      state[acct].sort((a, b) => b.date.localeCompare(a.date));
+
+      // Check if imported dates fall outside activePeriod; if so, switch period so user immediately sees them
+      const importedMonths = Array.from(new Set(toImport.map(t => t.date.slice(0, 7))));
+      if (state.activePeriod !== 'ALL' && !importedMonths.includes(state.activePeriod)) {
+        state.activePeriod = importedMonths.length === 1 ? importedMonths[0] : 'ALL';
+      }
+
+      saveState();
+      closeCsvImportModal();
+      switchTab(acct);
+      showToast(`Imported ${toImport.length} CSV transaction${toImport.length === 1 ? '' : 's'} into ${acct.toUpperCase()}`);
     }
 
     function exportCSV(acct) {
